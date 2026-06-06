@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"math"
 	"net/http"
+	"regexp"
 	"strconv"
 
 	"paper-cutting-workshop/db"
@@ -12,10 +13,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+var phoneRegex = regexp.MustCompile(`^1[3-9]\d{9}$`)
+
 func CreateBooking(c *gin.Context) {
 	var req models.BookingRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "参数错误: " + err.Error()})
+		return
+	}
+
+	if !phoneRegex.MatchString(req.UserPhone) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请输入正确的11位手机号"})
 		return
 	}
 
@@ -56,17 +64,31 @@ func CreateBooking(c *gin.Context) {
 		return
 	}
 
-	var existingCount int
+	var phoneBookingCount int
 	err = tx.QueryRow(
 		"SELECT COUNT(*) FROM bookings WHERE course_id = ? AND user_phone = ? AND status = 'booked'",
 		req.CourseID, req.UserPhone,
+	).Scan(&phoneBookingCount)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if phoneBookingCount >= 3 {
+		c.JSON(http.StatusConflict, gin.H{"error": "同一手机号最多预约3个名额，如需更多请联系管理员"})
+		return
+	}
+
+	var existingCount int
+	err = tx.QueryRow(
+		"SELECT COUNT(*) FROM bookings WHERE course_id = ? AND user_phone = ? AND user_name = ? AND status = 'booked'",
+		req.CourseID, req.UserPhone, req.UserName,
 	).Scan(&existingCount)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	if existingCount > 0 {
-		c.JSON(http.StatusConflict, gin.H{"error": "您已预约过该课程"})
+		c.JSON(http.StatusConflict, gin.H{"error": req.UserName + " 已预约过该课程"})
 		return
 	}
 

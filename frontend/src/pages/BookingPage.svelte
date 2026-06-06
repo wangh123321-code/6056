@@ -1,18 +1,39 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onMount, getContext } from 'svelte'
   import { api } from '../api/index.js'
 
   export let userPhone = ''
+  export let userName = ''
+
+  const { showAlert, showConfirm } = getContext('dialog')
 
   let courses = []
   let loading = true
   let bookingModal = false
   let selectedCourse = null
-  let userName = ''
   let bookingPhone = ''
+  let bookingName = ''
   let bookingMsg = ''
   let bookingError = ''
   let bookingLoading = false
+  let phoneError = ''
+
+  const phoneRegex = /^1[3-9]\d{9}$/
+
+  function validatePhone(phone) {
+    if (!phone.trim()) {
+      phoneError = '请输入手机号'
+      return false
+    }
+    if (!phoneRegex.test(phone.trim())) {
+      phoneError = '请输入正确的11位手机号'
+      return false
+    }
+    phoneError = ''
+    return true
+  }
+
+  $: if (bookingPhone) validatePhone(bookingPhone)
 
   onMount(async () => {
     await loadCourses()
@@ -31,9 +52,11 @@
 
   function openBooking(course) {
     selectedCourse = course
-    bookingPhone = userPhone
+    bookingPhone = userPhone || ''
+    bookingName = userName || ''
     bookingMsg = ''
     bookingError = ''
+    phoneError = ''
     bookingModal = true
   }
 
@@ -44,8 +67,12 @@
 
   async function submitBooking() {
     if (!selectedCourse) return
-    if (!userName.trim() || !bookingPhone.trim()) {
-      bookingError = '请填写姓名和手机号'
+    if (!bookingName.trim()) {
+      bookingError = '请填写姓名'
+      return
+    }
+    if (!validatePhone(bookingPhone)) {
+      bookingError = phoneError
       return
     }
     bookingLoading = true
@@ -53,11 +80,12 @@
     try {
       const res = await api.createBooking({
         course_id: selectedCourse.id,
-        user_name: userName.trim(),
+        user_name: bookingName.trim(),
         user_phone: bookingPhone.trim(),
       })
       userPhone = bookingPhone.trim()
-      bookingMsg = `预约成功！${res.data.course_title}（${res.data.date} ${res.data.time_slot}），剩余名额：${res.data.remaining}`
+      userName = bookingName.trim()
+      bookingMsg = `预约成功！\n${res.data.course_title}\n${res.data.date} ${res.data.time_slot}\n剩余名额：${res.data.remaining}`
       await loadCourses()
     } catch (e) {
       bookingError = e.message
@@ -135,7 +163,7 @@
     <div class="modal" on:click|stopPropagation role="document">
       <div class="modal-header">
         <h3>预约课程</h3>
-        <button class="modal-close" on:click={closeBooking}>✕</button>
+        <button class="modal-close" on:click={closeBooking} aria-label="关闭">✕</button>
       </div>
       <div class="modal-body">
         {#if selectedCourse}
@@ -148,14 +176,31 @@
 
         {#if bookingMsg}
           <div class="msg-success">{bookingMsg}</div>
+          <button class="btn btn-primary btn-block" style="margin-top: 16px;" on:click={closeBooking}>
+            关闭
+          </button>
         {:else}
           <div class="form-group">
-            <label for="booking-name">姓名</label>
-            <input id="booking-name" type="text" bind:value={userName} placeholder="请输入您的姓名" />
+            <label for="booking-name">姓名 *</label>
+            <input
+              id="booking-name"
+              type="text"
+              bind:value={bookingName}
+              placeholder="请输入您的姓名"
+            />
           </div>
           <div class="form-group">
-            <label for="booking-phone">手机号</label>
-            <input id="booking-phone" type="tel" bind:value={bookingPhone} placeholder="请输入手机号" />
+            <label for="booking-phone">手机号 *</label>
+            <input
+              id="booking-phone"
+              type="tel"
+              bind:value={bookingPhone}
+              placeholder="请输入11位手机号"
+              maxlength="11"
+            />
+            {#if phoneError}
+              <div class="field-error">{phoneError}</div>
+            {/if}
           </div>
           {#if bookingError}
             <div class="msg-error">{bookingError}</div>
@@ -314,6 +359,12 @@
     align-items: center;
     justify-content: center;
     z-index: 1000;
+    animation: fadeIn 0.2s ease;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
 
   .modal {
@@ -322,6 +373,18 @@
     width: 420px;
     max-width: 90vw;
     box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    animation: slideUp 0.25s ease;
+  }
+
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   .modal-header {
@@ -376,13 +439,20 @@
     border-color: #8b2500;
   }
 
+  .field-error {
+    color: #dc3545;
+    font-size: 0.8rem;
+    margin-top: 4px;
+  }
+
   .msg-success {
     background: #d4edda;
     color: #155724;
     padding: 16px;
     border-radius: 8px;
     text-align: center;
-    line-height: 1.6;
+    line-height: 1.8;
+    white-space: pre-line;
   }
 
   .msg-error {

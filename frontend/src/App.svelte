@@ -1,13 +1,23 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onMount, setContext } from 'svelte'
   import BookingPage from './pages/BookingPage.svelte'
   import MyBookingsPage from './pages/MyBookingsPage.svelte'
   import AdminCoursesPage from './pages/AdminCoursesPage.svelte'
   import AdminStatsPage from './pages/AdminStatsPage.svelte'
   import AdminCalendarPage from './pages/AdminCalendarPage.svelte'
+  import Modal from './components/Modal.svelte'
 
   let currentRoute = 'booking'
   let userPhone = ''
+  let userName = ''
+
+  let modalShow = false
+  let modalTitle = ''
+  let modalMessage = ''
+  let modalType = 'alert'
+  let modalConfirmText = '确定'
+  let modalCancelText = '取消'
+  let modalResolve = null
 
   const routes = [
     { id: 'booking', label: '课程预约', icon: '📋' },
@@ -17,8 +27,48 @@
     { id: 'admin-stats', label: '预约统计', icon: '📊' },
   ]
 
+  onMount(() => {
+    const savedPhone = localStorage.getItem('workshop_user_phone')
+    const savedName = localStorage.getItem('workshop_user_name')
+    if (savedPhone) userPhone = savedPhone
+    if (savedName) userName = savedName
+  })
+
+  $: if (userPhone) localStorage.setItem('workshop_user_phone', userPhone)
+  $: if (userName) localStorage.setItem('workshop_user_name', userName)
+
+  function showAlert(title, message) {
+    return new Promise((resolve) => {
+      modalTitle = title
+      modalMessage = message
+      modalType = 'alert'
+      modalConfirmText = '确定'
+      modalShow = true
+      modalResolve = resolve
+    })
+  }
+
+  function showConfirm(title, message, confirmText = '确定', cancelText = '取消') {
+    return new Promise((resolve) => {
+      modalTitle = title
+      modalMessage = message
+      modalType = 'confirm'
+      modalConfirmText = confirmText
+      modalCancelText = cancelText
+      modalShow = true
+      modalResolve = resolve
+    })
+  }
+
+  setContext('dialog', { showAlert, showConfirm })
+
   function navigate(route) {
     currentRoute = route
+  }
+
+  function handleModalResolve(val) {
+    if (modalResolve) modalResolve(val)
+    modalResolve = null
   }
 </script>
 
@@ -53,7 +103,7 @@
 
   <div class="content">
     {#if currentRoute === 'booking'}
-      <BookingPage bind:userPhone />
+      <BookingPage bind:userPhone bind:userName />
     {:else if currentRoute === 'my-bookings'}
       <MyBookingsPage bind:userPhone />
     {:else if currentRoute === 'admin-courses'}
@@ -65,6 +115,16 @@
     {/if}
   </div>
 </main>
+
+<Modal
+  bind:show={modalShow}
+  title={modalTitle}
+  message={modalMessage}
+  type={modalType}
+  confirmText={modalConfirmText}
+  cancelText={modalCancelText}
+  resolve={handleModalResolve}
+/>
 
 <style>
   :global(*) {

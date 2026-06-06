@@ -1,42 +1,69 @@
 <script>
-  import { onMount } from 'svelte'
+  import { getContext } from 'svelte'
   import { api } from '../api/index.js'
 
   export let userPhone = ''
+
+  const { showAlert, showConfirm } = getContext('dialog')
 
   let phone = ''
   let bookings = []
   let loading = false
   let searched = false
   let cancelLoading = {}
+  let phoneError = ''
 
-  $: if (userPhone && !searched) {
-    phone = userPhone
-    searchBookings()
+  const phoneRegex = /^1[3-9]\d{9}$/
+
+  function validatePhone(phone) {
+    if (!phone.trim()) {
+      phoneError = '请输入手机号'
+      return false
+    }
+    if (!phoneRegex.test(phone.trim())) {
+      phoneError = '请输入正确的11位手机号'
+      return false
+    }
+    phoneError = ''
+    return true
   }
 
+  $: if (phone) validatePhone(phone)
+
   async function searchBookings() {
-    if (!phone.trim()) return
+    if (!validatePhone(phone.trim())) {
+      await showAlert('输入有误', phoneError)
+      return
+    }
     loading = true
     searched = true
     try {
       const res = await api.getMyBookings(phone.trim())
       bookings = res.data || []
+      userPhone = phone.trim()
     } catch (e) {
-      console.error(e)
+      await showAlert('查询失败', e.message)
       bookings = []
     }
     loading = false
   }
 
   async function cancelBooking(booking) {
-    if (!confirm(`确认取消「${booking.course_title}」的预约吗？`)) return
+    const confirmed = await showConfirm(
+      '确认取消',
+      `确认取消「${booking.course_title}」\n（${booking.course_date} ${booking.course_slot}）的预约吗？\n取消后名额将释放给其他用户。`,
+      '确认取消',
+      '再想想'
+    )
+    if (!confirmed) return
+
     cancelLoading[booking.id] = true
     try {
       await api.cancelBooking(booking.id)
+      await showAlert('取消成功', '预约已取消，名额已释放')
       await searchBookings()
     } catch (e) {
-      alert(e.message)
+      await showAlert('取消失败', e.message)
     }
     cancelLoading[booking.id] = false
   }
@@ -53,12 +80,18 @@
   </div>
 
   <div class="search-bar">
-    <input
-      type="tel"
-      bind:value={phone}
-      placeholder="请输入手机号查询预约记录"
-      on:keydown={(e) => e.key === 'Enter' && searchBookings()}
-    />
+    <div class="search-input-wrap">
+      <input
+        type="tel"
+        bind:value={phone}
+        placeholder="请输入11位手机号查询预约记录"
+        maxlength="11"
+        on:keydown={(e) => e.key === 'Enter' && searchBookings()}
+      />
+      {#if phoneError}
+        <div class="field-error">{phoneError}</div>
+      {/if}
+    </div>
     <button class="btn btn-primary" on:click={searchBookings} disabled={loading}>
       {loading ? '查询中...' : '查询'}
     </button>
@@ -131,10 +164,15 @@
     display: flex;
     gap: 12px;
     margin-bottom: 24px;
+    align-items: flex-start;
+  }
+
+  .search-input-wrap {
+    flex: 1;
   }
 
   .search-bar input {
-    flex: 1;
+    width: 100%;
     padding: 10px 14px;
     border: 1px solid #ddd;
     border-radius: 8px;
@@ -146,12 +184,20 @@
     border-color: #8b2500;
   }
 
+  .field-error {
+    color: #dc3545;
+    font-size: 0.8rem;
+    margin-top: 4px;
+  }
+
   .btn {
     padding: 10px 20px;
     border: none;
     border-radius: 8px;
     font-size: 0.9rem;
     cursor: pointer;
+    transition: all 0.2s;
+    height: fit-content;
   }
 
   .btn-primary { background: #8b2500; color: white; }
@@ -187,6 +233,12 @@
     display: flex;
     align-items: center;
     gap: 20px;
+    animation: fadeIn 0.3s ease;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
   }
 
   .booking-card.cancelled { opacity: 0.65; }

@@ -42,7 +42,7 @@ func migrate() {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		cancelled_at DATETIME,
 		FOREIGN KEY (course_id) REFERENCES courses(id),
-		UNIQUE(course_id, user_phone, status)
+		UNIQUE(course_id, user_phone, user_name, status)
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_bookings_course_id ON bookings(course_id);

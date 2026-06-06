@@ -1,6 +1,8 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onMount, getContext } from 'svelte'
   import { api } from '../api/index.js'
+
+  const { showAlert, showConfirm } = getContext('dialog')
 
   let courses = []
   let loading = true
@@ -57,13 +59,19 @@
       formError = '请填写所有必填字段'
       return
     }
+    if (formData.capacity < 1) {
+      formError = '名额上限至少为1'
+      return
+    }
     formLoading = true
     formError = ''
     try {
       if (editingCourse) {
         await api.updateCourse(editingCourse.id, formData)
+        await showAlert('更新成功', '课程信息已更新')
       } else {
         await api.createCourse(formData)
+        await showAlert('发布成功', '课程已成功发布')
       }
       closeModal()
       await loadCourses()
@@ -74,12 +82,20 @@
   }
 
   async function deleteCourse(course) {
-    if (!confirm(`确认删除课程「${course.title}」吗？`)) return
+    const confirmed = await showConfirm(
+      '确认删除',
+      `确认删除课程「${course.title}」（${course.date} ${course.time_slot}）吗？\n有预约的课程无法删除。`,
+      '确认删除',
+      '取消'
+    )
+    if (!confirmed) return
+
     try {
       await api.deleteCourse(course.id)
+      await showAlert('删除成功', '课程已删除')
       await loadCourses()
     } catch (e) {
-      alert(e.message)
+      await showAlert('删除失败', e.message)
     }
   }
 
@@ -90,7 +106,7 @@
       selectedCourseBookings = res.data || []
       showBookingsModal = true
     } catch (e) {
-      alert(e.message)
+      await showAlert('查询失败', e.message)
     }
   }
 
@@ -98,14 +114,23 @@
     showBookingsModal = false
   }
 
-  async function markAttended(bookingId) {
+  async function markAttended(booking) {
+    const confirmed = await showConfirm(
+      '标记到课',
+      `确认将 ${booking.user_name}（${booking.user_phone}）标记为已到课？`,
+      '确认标记',
+      '取消'
+    )
+    if (!confirmed) return
+
     try {
-      await api.markAttendance(bookingId)
+      await api.markAttendance(booking.id)
       await loadCourses()
-      const res = await api.getCourseBookings(selectedCourseBookings[0]?.course_id)
+      const res = await api.getCourseBookings(booking.course_id)
       selectedCourseBookings = res.data || []
+      await showAlert('操作成功', '已标记为到课')
     } catch (e) {
-      alert(e.message)
+      await showAlert('操作失败', e.message)
     }
   }
 </script>
@@ -171,7 +196,7 @@
     <div class="modal" on:click|stopPropagation role="document">
       <div class="modal-header">
         <h3>{editingCourse ? '编辑课程' : '发布新课程'}</h3>
-        <button class="modal-close" on:click={closeModal}>✕</button>
+        <button class="modal-close" on:click={closeModal} aria-label="关闭">✕</button>
       </div>
       <div class="modal-body">
         <div class="form-group">
@@ -206,7 +231,7 @@
     <div class="modal modal-lg" on:click|stopPropagation role="document">
       <div class="modal-header">
         <h3>预约名单 - {selectedCourseTitle}</h3>
-        <button class="modal-close" on:click={closeBookings}>✕</button>
+        <button class="modal-close" on:click={closeBookings} aria-label="关闭">✕</button>
       </div>
       <div class="modal-body">
         {#if selectedCourseBookings.length === 0}
@@ -241,7 +266,7 @@
                   <td>{new Date(booking.created_at).toLocaleString('zh-CN')}</td>
                   <td>
                     {#if booking.status === 'booked'}
-                      <button class="btn-sm btn-info" on:click={() => markAttended(booking.id)}>到课</button>
+                      <button class="btn-sm btn-info" on:click={() => markAttended(booking)}>到课</button>
                     {:else}
                       -
                     {/if}
@@ -274,6 +299,7 @@
     border-radius: 8px;
     font-size: 0.9rem;
     cursor: pointer;
+    transition: all 0.2s;
   }
 
   .btn-primary { background: #8b2500; color: white; }
@@ -287,6 +313,7 @@
     border-radius: 4px;
     font-size: 0.8rem;
     cursor: pointer;
+    transition: all 0.2s;
   }
 
   .btn-info { background: #cce5ff; color: #004085; }
@@ -372,6 +399,12 @@
     align-items: center;
     justify-content: center;
     z-index: 1000;
+    animation: fadeIn 0.2s ease;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
 
   .modal {
@@ -380,6 +413,18 @@
     width: 480px;
     max-width: 90vw;
     box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    animation: slideUp 0.25s ease;
+  }
+
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   .modal-lg { width: 720px; }
