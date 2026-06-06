@@ -47,6 +47,8 @@ func migrate() {
 
 	CREATE INDEX IF NOT EXISTS idx_bookings_course_id ON bookings(course_id);
 	CREATE INDEX IF NOT EXISTS idx_bookings_user_phone ON bookings(user_phone);
+	CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings(status);
+	CREATE INDEX IF NOT EXISTS idx_bookings_course_status ON bookings(course_id, status);
 	CREATE INDEX IF NOT EXISTS idx_courses_date ON courses(date);
 	`)
 	if err != nil {

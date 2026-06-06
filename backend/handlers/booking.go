@@ -29,7 +29,7 @@ func CreateBooking(c *gin.Context) {
 	var capacity, booked int
 	var title, date, timeSlot string
 	err = tx.QueryRow(
-		"SELECT capacity, title, date, time_slot FROM courses WHERE id = ? FOR UPDATE",
+		"SELECT capacity, title, date, time_slot FROM courses WHERE id = ?",
 		req.CourseID,
 	).Scan(&capacity, &title, &date, &timeSlot)
 

@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	db.Init("./workshop.db")
+	db.Init("/app/data/workshop.db")
 
 	r := gin.Default()
 	r.Use(middleware.CORS())
