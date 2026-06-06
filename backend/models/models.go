@@ -3,14 +3,15 @@ package models
 import "time"
 
 type Course struct {
-	ID        int64     `json:"id"`
-	Title     string    `json:"title"`
-	Date      string    `json:"date"`
-	TimeSlot  string    `json:"time_slot"`
-	Capacity  int       `json:"capacity"`
-	Booked    int       `json:"booked"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID             int64     `json:"id"`
+	Title          string    `json:"title"`
+	Date           string    `json:"date"`
+	TimeSlot       string    `json:"time_slot"`
+	Capacity       int       `json:"capacity"`
+	Booked         int       `json:"booked"`
+	WaitlistCount  int       `json:"waitlist_count,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type Booking struct {
@@ -40,12 +41,42 @@ type CourseRequest struct {
 }
 
 type StatsResponse struct {
-	CourseID    int64   `json:"course_id"`
-	CourseTitle string  `json:"course_title"`
-	CourseDate  string  `json:"course_date"`
-	CourseSlot  string  `json:"course_slot"`
-	Capacity    int     `json:"capacity"`
-	Booked      int     `json:"booked"`
-	Attended    int     `json:"attended"`
-	AttendRate  float64 `json:"attend_rate"`
+	CourseID       int64   `json:"course_id"`
+	CourseTitle    string  `json:"course_title"`
+	CourseDate     string  `json:"course_date"`
+	CourseSlot     string  `json:"course_slot"`
+	Capacity       int     `json:"capacity"`
+	Booked         int     `json:"booked"`
+	Attended       int     `json:"attended"`
+	WaitlistCount  int     `json:"waitlist_count"`
+	AttendRate     float64 `json:"attend_rate"`
+}
+
+type Waitlist struct {
+	ID          int64      `json:"id"`
+	CourseID    int64      `json:"course_id"`
+	UserName    string     `json:"user_name"`
+	UserPhone   string     `json:"user_phone"`
+	Position    int        `json:"position"`
+	Status      string     `json:"status"`
+	NotifiedAt  *time.Time `json:"notified_at,omitempty"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	CourseTitle string     `json:"course_title,omitempty"`
+	CourseDate  string     `json:"course_date,omitempty"`
+	CourseSlot  string     `json:"course_slot,omitempty"`
+	Type        string     `json:"type,omitempty"`
+}
+
+type WaitlistConfirmRequest struct {
+	WaitlistID int64 `json:"waitlist_id" binding:"required"`
+}
+
+type AvailabilityResponse struct {
+	CourseID       int64 `json:"course_id"`
+	Capacity       int   `json:"capacity"`
+	Booked         int   `json:"booked"`
+	Available      int   `json:"available"`
+	IsFull         bool  `json:"is_full"`
+	WaitlistCount  int   `json:"waitlist_count"`
 }

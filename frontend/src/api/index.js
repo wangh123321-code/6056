@@ -38,6 +38,9 @@ export const api = {
   getCourseBookings(courseId) {
     return request('/courses/' + courseId + '/bookings')
   },
+  getCourseWaitlist(courseId) {
+    return request('/courses/' + courseId + '/waitlist')
+  },
   checkAvailability(courseId) {
     return request('/courses/' + courseId + '/availability')
   },
@@ -49,5 +52,14 @@ export const api = {
   },
   markAttendance(bookingId) {
     return request('/attendance/' + bookingId, { method: 'PUT' })
+  },
+  addToWaitlist(data) {
+    return request('/waitlist', { method: 'POST', body: JSON.stringify(data) })
+  },
+  confirmWaitlist(waitlistId) {
+    return request('/waitlist/confirm', { method: 'POST', body: JSON.stringify({ waitlist_id: waitlistId }) })
+  },
+  cancelWaitlist(id) {
+    return request('/waitlist/' + id, { method: 'DELETE' })
   },
 }

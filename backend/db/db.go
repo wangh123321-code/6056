@@ -50,6 +50,26 @@ func migrate() {
 	CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings(status);
 	CREATE INDEX IF NOT EXISTS idx_bookings_course_status ON bookings(course_id, status);
 	CREATE INDEX IF NOT EXISTS idx_courses_date ON courses(date);
+
+	CREATE TABLE IF NOT EXISTS waitlists (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		course_id INTEGER NOT NULL,
+		user_name TEXT NOT NULL,
+		user_phone TEXT NOT NULL,
+		position INTEGER NOT NULL,
+		status TEXT NOT NULL DEFAULT 'waiting',
+		notified_at DATETIME,
+		expires_at DATETIME,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (course_id) REFERENCES courses(id),
+		UNIQUE(course_id, user_phone, status)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_waitlists_course_id ON waitlists(course_id);
+	CREATE INDEX IF NOT EXISTS idx_waitlists_user_phone ON waitlists(user_phone);
+	CREATE INDEX IF NOT EXISTS idx_waitlists_status ON waitlists(status);
+	CREATE INDEX IF NOT EXISTS idx_waitlists_course_status ON waitlists(course_id, status);
+	CREATE INDEX IF NOT EXISTS idx_waitlists_expires_at ON waitlists(expires_at);
 	`)
 	if err != nil {
 		log.Fatal("Migration failed:", err)

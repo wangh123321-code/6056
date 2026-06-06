@@ -14,6 +14,9 @@
   let showBookingsModal = false
   let selectedCourseBookings = []
   let selectedCourseTitle = ''
+  let showWaitlistModal = false
+  let selectedCourseWaitlist = []
+  let selectedCourseWaitlistCount = 0
 
   onMount(async () => {
     await loadCourses()
@@ -114,6 +117,22 @@
     showBookingsModal = false
   }
 
+  async function viewWaitlist(course) {
+    selectedCourseTitle = course.title
+    try {
+      const res = await api.getCourseWaitlist(course.id)
+      selectedCourseWaitlist = res.data || []
+      selectedCourseWaitlistCount = res.count || 0
+      showWaitlistModal = true
+    } catch (e) {
+      await showAlert('查询失败', e.message)
+    }
+  }
+
+  function closeWaitlist() {
+    showWaitlistModal = false
+  }
+
   async function markAttended(booking) {
     const confirmed = await showConfirm(
       '标记到课',
@@ -155,6 +174,7 @@
             <th>时段</th>
             <th>名额</th>
             <th>已预约</th>
+            <th>候补</th>
             <th>状态</th>
             <th>操作</th>
           </tr>
@@ -172,6 +192,11 @@
                 </span>
               </td>
               <td>
+                <span class:waitlist-full={(course.waitlist_count || 0) > 0}>
+                  {course.waitlist_count || 0}人
+                </span>
+              </td>
+              <td>
                 {#if course.booked >= course.capacity}
                   <span class="badge badge-full">已满</span>
                 {:else}
@@ -180,6 +205,7 @@
               </td>
               <td class="actions">
                 <button class="btn-sm btn-info" on:click={() => viewBookings(course)}>名单</button>
+                <button class="btn-sm btn-warn" on:click={() => viewWaitlist(course)}>候补</button>
                 <button class="btn-sm btn-warn" on:click={() => openEdit(course)}>编辑</button>
                 <button class="btn-sm btn-del" on:click={() => deleteCourse(course)}>删除</button>
               </td>
@@ -267,6 +293,59 @@
                   <td>
                     {#if booking.status === 'booked'}
                       <button class="btn-sm btn-info" on:click={() => markAttended(booking)}>到课</button>
+                    {:else}
+                      -
+                    {/if}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showWaitlistModal}
+  <div class="modal-overlay" on:click={closeWaitlist} on:keydown={(e) => e.key === 'Escape' && closeWaitlist()} role="dialog" aria-modal="true">
+    <div class="modal modal-lg" on:click|stopPropagation role="document">
+      <div class="modal-header">
+        <h3>候补队列 - {selectedCourseTitle} ({selectedCourseWaitlistCount}人)</h3>
+        <button class="modal-close" on:click={closeWaitlist} aria-label="关闭">✕</button>
+      </div>
+      <div class="modal-body">
+        {#if selectedCourseWaitlist.length === 0}
+          <div class="empty-sm">暂无候补人员</div>
+        {:else}
+          <table class="inner-table">
+            <thead>
+              <tr>
+                <th>顺位</th>
+                <th>姓名</th>
+                <th>手机号</th>
+                <th>状态</th>
+                <th>候补时间</th>
+                <th>到期时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each selectedCourseWaitlist as item, i}
+                <tr>
+                  <td><strong>{item.position}</strong></td>
+                  <td>{item.user_name}</td>
+                  <td>{item.user_phone}</td>
+                  <td>
+                    {#if item.status === 'notified'}
+                      <span class="status-badge status-notified">待确认</span>
+                    {:else}
+                      <span class="status-badge status-waiting">排队中</span>
+                    {/if}
+                  </td>
+                  <td>{new Date(item.created_at).toLocaleString('zh-CN')}</td>
+                  <td>
+                    {#if item.expires_at}
+                      <span class="expire-warning">{new Date(item.expires_at).toLocaleString('zh-CN')}</span>
                     {:else}
                       -
                     {/if}
@@ -390,6 +469,18 @@
   .status-booked { background: #d4edda; color: #155724; }
   .status-attended { background: #cce5ff; color: #004085; }
   .status-cancelled { background: #f8d7da; color: #721c24; }
+  .status-waiting { background: #ffe5cc; color: #a04000; }
+  .status-notified { background: #ffc107; color: #523e02; }
+
+  .waitlist-full {
+    color: #fd7e14;
+    font-weight: 600;
+  }
+
+  .expire-warning {
+    color: #dc3545;
+    font-weight: 600;
+  }
 
   .modal-overlay {
     position: fixed;

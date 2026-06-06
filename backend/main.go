@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"time"
 
 	"paper-cutting-workshop/db"
 	"paper-cutting-workshop/handlers"
@@ -12,6 +13,8 @@ import (
 
 func main() {
 	db.Init("/app/data/workshop.db")
+
+	go startWaitlistCleaner()
 
 	r := gin.Default()
 	r.Use(middleware.CORS())
@@ -35,9 +38,17 @@ func main() {
 			bookings.DELETE("/:id", handlers.CancelBooking)
 		}
 
+		waitlist := api.Group("/waitlist")
+		{
+			waitlist.POST("", handlers.AddToWaitlist)
+			waitlist.POST("/confirm", handlers.ConfirmWaitlist)
+			waitlist.DELETE("/:id", handlers.CancelWaitlist)
+		}
+
 		courseBookings := api.Group("/courses")
 		{
 			courseBookings.GET("/:id/bookings", handlers.GetCourseBookings)
+			courseBookings.GET("/:id/waitlist", handlers.GetCourseWaitlist)
 			courseBookings.GET("/:id/availability", handlers.CheckAvailability)
 		}
 
@@ -55,5 +66,14 @@ func main() {
 	log.Println("Server starting on :8080")
 	if err := r.Run(":8080"); err != nil {
 		log.Fatal("Failed to start server:", err)
+	}
+}
+
+func startWaitlistCleaner() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		handlers.ProcessExpiredWaitlists()
 	}
 }

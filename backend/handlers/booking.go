@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"time"
 
 	"paper-cutting-workshop/db"
 	"paper-cutting-workshop/models"
@@ -60,7 +61,11 @@ func CreateBooking(c *gin.Context) {
 	}
 
 	if booked >= capacity {
-		c.JSON(http.StatusConflict, gin.H{"error": "名额已满，无法预约"})
+		c.JSON(http.StatusConflict, gin.H{
+			"error":       "名额已满，无法预约",
+			"is_full":     true,
+			"can_waitlist": true,
+		})
 		return
 	}
 
@@ -132,7 +137,8 @@ func CancelBooking(c *gin.Context) {
 	defer tx.Rollback()
 
 	var status string
-	err = tx.QueryRow("SELECT status FROM bookings WHERE id = ?", id).Scan(&status)
+	var courseID int64
+	err = tx.QueryRow("SELECT status, course_id FROM bookings WHERE id = ?", id).Scan(&status, &courseID)
 	if err == sql.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"error": "预约记录不存在"})
 		return
@@ -156,6 +162,12 @@ func CancelBooking(c *gin.Context) {
 		return
 	}
 
+	err = notifyNextWaitlist(tx, courseID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
 	if err := tx.Commit(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -173,24 +185,58 @@ func GetMyBookings(c *gin.Context) {
 
 	rows, err := db.DB.Query(`
 		SELECT b.id, b.course_id, b.user_name, b.user_phone, b.status, b.created_at, b.cancelled_at,
-			c.title as course_title, c.date as course_date, c.time_slot as course_slot
+			c.title as course_title, c.date as course_date, c.time_slot as course_slot,
+			'booking' as type
 		FROM bookings b
 		JOIN courses c ON b.course_id = c.id
 		WHERE b.user_phone = ?
-		ORDER BY b.created_at DESC
-	`, phone)
+		UNION ALL
+		SELECT w.id, w.course_id, w.user_name, w.user_phone, w.status, w.created_at, NULL,
+			c.title as course_title, c.date as course_date, c.time_slot as course_slot,
+			'waitlist' as type
+		FROM waitlists w
+		JOIN courses c ON w.course_id = c.id
+		WHERE w.user_phone = ? AND w.status IN ('waiting', 'notified')
+		ORDER BY created_at DESC
+	`, phone, phone)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	defer rows.Close()
 
-	bookings := []models.Booking{}
+	type CombinedBooking struct {
+		ID          int64      `json:"id"`
+		CourseID    int64      `json:"course_id"`
+		UserName    string     `json:"user_name"`
+		UserPhone   string     `json:"user_phone"`
+		Status      string     `json:"status"`
+		CreatedAt   time.Time  `json:"created_at"`
+		CancelledAt *time.Time `json:"cancelled_at,omitempty"`
+		CourseTitle string     `json:"course_title,omitempty"`
+		CourseDate  string     `json:"course_date,omitempty"`
+		CourseSlot  string     `json:"course_slot,omitempty"`
+		Type        string     `json:"type"`
+		Position    int        `json:"position,omitempty"`
+		ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	}
+
+	bookings := []CombinedBooking{}
 	for rows.Next() {
-		var b models.Booking
-		if err := rows.Scan(&b.ID, &b.CourseID, &b.UserName, &b.UserPhone, &b.Status, &b.CreatedAt, &b.CancelledAt, &b.CourseTitle, &b.CourseDate, &b.CourseSlot); err != nil {
+		var b CombinedBooking
+		if err := rows.Scan(&b.ID, &b.CourseID, &b.UserName, &b.UserPhone, &b.Status, &b.CreatedAt, &b.CancelledAt, &b.CourseTitle, &b.CourseDate, &b.CourseSlot, &b.Type); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
+		}
+		if b.Type == "waitlist" {
+			var position int
+			var expiresAt *time.Time
+			_ = db.DB.QueryRow(
+				"SELECT position, expires_at FROM waitlists WHERE id = ?",
+				b.ID,
+			).Scan(&position, &expiresAt)
+			b.Position = position
+			b.ExpiresAt = expiresAt
 		}
 		bookings = append(bookings, b)
 	}
@@ -229,17 +275,24 @@ func GetCourseBookings(c *gin.Context) {
 func CheckAvailability(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 
-	var capacity, booked int
+	var capacity, booked, waitlistCount int
 	err := db.DB.QueryRow(`
-		SELECT c.capacity, COALESCE(b.booked_count, 0)
+		SELECT c.capacity,
+			COALESCE(b.booked_count, 0),
+			COALESCE(w.waitlist_count, 0)
 		FROM courses c
 		LEFT JOIN (
 			SELECT course_id, COUNT(*) as booked_count
 			FROM bookings WHERE status = 'booked'
 			GROUP BY course_id
 		) b ON c.id = b.course_id
+		LEFT JOIN (
+			SELECT course_id, COUNT(*) as waitlist_count
+			FROM waitlists WHERE status IN ('waiting', 'notified')
+			GROUP BY course_id
+		) w ON c.id = w.course_id
 		WHERE c.id = ?
-	`, id).Scan(&capacity, &booked)
+	`, id).Scan(&capacity, &booked, &waitlistCount)
 
 	if err == sql.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"error": "课程不存在"})
@@ -253,11 +306,12 @@ func CheckAvailability(c *gin.Context) {
 	available := capacity - booked
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
-			"course_id":  id,
-			"capacity":   capacity,
-			"booked":     booked,
-			"available":  available,
-			"is_full":    available <= 0,
+			"course_id":       id,
+			"capacity":        capacity,
+			"booked":          booked,
+			"available":       available,
+			"is_full":         available <= 0,
+			"waitlist_count":  waitlistCount,
 		},
 	})
 }
@@ -267,13 +321,19 @@ func GetCalendarEvents(c *gin.Context) {
 
 	query := `
 		SELECT c.id, c.title, c.date, c.time_slot, c.capacity,
-			COALESCE(b.booked_count, 0) as booked
+			COALESCE(b.booked_count, 0) as booked,
+			COALESCE(w.waitlist_count, 0) as waitlist_count
 		FROM courses c
 		LEFT JOIN (
 			SELECT course_id, COUNT(*) as booked_count
 			FROM bookings WHERE status = 'booked'
 			GROUP BY course_id
 		) b ON c.id = b.course_id
+		LEFT JOIN (
+			SELECT course_id, COUNT(*) as waitlist_count
+			FROM waitlists WHERE status IN ('waiting', 'notified')
+			GROUP BY course_id
+		) w ON c.id = w.course_id
 	`
 	var rows *sql.Rows
 	var err error
@@ -293,19 +353,20 @@ func GetCalendarEvents(c *gin.Context) {
 	defer rows.Close()
 
 	type CalendarEvent struct {
-		ID       int64  `json:"id"`
-		Title    string `json:"title"`
-		Date     string `json:"date"`
-		TimeSlot string `json:"time_slot"`
-		Capacity int    `json:"capacity"`
-		Booked   int    `json:"booked"`
-		IsFull   bool   `json:"is_full"`
+		ID            int64  `json:"id"`
+		Title         string `json:"title"`
+		Date          string `json:"date"`
+		TimeSlot      string `json:"time_slot"`
+		Capacity      int    `json:"capacity"`
+		Booked        int    `json:"booked"`
+		WaitlistCount int    `json:"waitlist_count"`
+		IsFull        bool   `json:"is_full"`
 	}
 
 	events := []CalendarEvent{}
 	for rows.Next() {
 		var e CalendarEvent
-		if err := rows.Scan(&e.ID, &e.Title, &e.Date, &e.TimeSlot, &e.Capacity, &e.Booked); err != nil {
+		if err := rows.Scan(&e.ID, &e.Title, &e.Date, &e.TimeSlot, &e.Capacity, &e.Booked, &e.WaitlistCount); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -320,7 +381,8 @@ func GetStats(c *gin.Context) {
 	query := `
 		SELECT c.id, c.title, c.date, c.time_slot, c.capacity,
 			COALESCE(b.booked_count, 0),
-			COALESCE(a.attended_count, 0)
+			COALESCE(a.attended_count, 0),
+			COALESCE(w.waitlist_count, 0)
 		FROM courses c
 		LEFT JOIN (
 			SELECT course_id, COUNT(*) as booked_count
@@ -332,6 +394,11 @@ func GetStats(c *gin.Context) {
 			FROM bookings WHERE status = 'attended'
 			GROUP BY course_id
 		) a ON c.id = a.course_id
+		LEFT JOIN (
+			SELECT course_id, COUNT(*) as waitlist_count
+			FROM waitlists WHERE status IN ('waiting', 'notified')
+			GROUP BY course_id
+		) w ON c.id = w.course_id
 		ORDER BY c.date DESC, c.time_slot
 	`
 
@@ -345,7 +412,7 @@ func GetStats(c *gin.Context) {
 	stats := []models.StatsResponse{}
 	for rows.Next() {
 		var s models.StatsResponse
-		if err := rows.Scan(&s.CourseID, &s.CourseTitle, &s.CourseDate, &s.CourseSlot, &s.Capacity, &s.Booked, &s.Attended); err != nil {
+		if err := rows.Scan(&s.CourseID, &s.CourseTitle, &s.CourseDate, &s.CourseSlot, &s.Capacity, &s.Booked, &s.Attended, &s.WaitlistCount); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

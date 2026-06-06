@@ -1,5 +1,5 @@
 <script>
-  import { onMount, getContext } from 'svelte'
+  import { onMount, onDestroy, getContext } from 'svelte'
   import { api } from '../api/index.js'
 
   export let userPhone = ''
@@ -17,6 +17,8 @@
   let bookingError = ''
   let bookingLoading = false
   let phoneError = ''
+  let bookingMode = 'booking'
+  let refreshTimer = null
 
   const phoneRegex = /^1[3-9]\d{9}$/
 
@@ -37,6 +39,15 @@
 
   onMount(async () => {
     await loadCourses()
+    refreshTimer = setInterval(async () => {
+      await loadCourses()
+    }, 30000)
+  })
+
+  onDestroy(() => {
+    if (refreshTimer) {
+      clearInterval(refreshTimer)
+    }
   })
 
   async function loadCourses() {
@@ -50,14 +61,19 @@
     loading = false
   }
 
-  function openBooking(course) {
+  function openBooking(course, mode = 'booking') {
     selectedCourse = course
     bookingPhone = userPhone || ''
     bookingName = userName || ''
     bookingMsg = ''
     bookingError = ''
     phoneError = ''
+    bookingMode = mode
     bookingModal = true
+  }
+
+  function openWaitlist(course) {
+    openBooking(course, 'waitlist')
   }
 
   function closeBooking() {
@@ -78,17 +94,34 @@
     bookingLoading = true
     bookingError = ''
     try {
-      const res = await api.createBooking({
-        course_id: selectedCourse.id,
-        user_name: bookingName.trim(),
-        user_phone: bookingPhone.trim(),
-      })
-      userPhone = bookingPhone.trim()
-      userName = bookingName.trim()
-      bookingMsg = `预约成功！\n${res.data.course_title}\n${res.data.date} ${res.data.time_slot}\n剩余名额：${res.data.remaining}`
+      let res
+      if (bookingMode === 'waitlist') {
+        res = await api.addToWaitlist({
+          course_id: selectedCourse.id,
+          user_name: bookingName.trim(),
+          user_phone: bookingPhone.trim(),
+        })
+        userPhone = bookingPhone.trim()
+        userName = bookingName.trim()
+        bookingMsg = `已加入候补队列！\n${res.data.course_title}\n${res.data.date} ${res.data.time_slot}\n当前第 ${res.data.position} 位，有名额释放时将自动通知您`
+      } else {
+        res = await api.createBooking({
+          course_id: selectedCourse.id,
+          user_name: bookingName.trim(),
+          user_phone: bookingPhone.trim(),
+        })
+        userPhone = bookingPhone.trim()
+        userName = bookingName.trim()
+        bookingMsg = `预约成功！\n${res.data.course_title}\n${res.data.date} ${res.data.time_slot}\n剩余名额：${res.data.remaining}`
+      }
       await loadCourses()
     } catch (e) {
-      bookingError = e.message
+      if (e.message.includes('名额已满') && bookingMode === 'booking') {
+        bookingError = '名额已满，是否加入候补队列？有名额释放时将自动通知您。'
+        bookingMode = 'waitlist'
+      } else {
+        bookingError = e.message
+      }
     }
     bookingLoading = false
   }
@@ -147,7 +180,7 @@
           </div>
           <div class="card-footer">
             {#if course.booked >= course.capacity}
-              <button class="btn btn-disabled" disabled>名额已满</button>
+              <button class="btn btn-waitlist" on:click={() => openWaitlist(course)}>加入候补</button>
             {:else}
               <button class="btn btn-primary" on:click={() => openBooking(course)}>立即预约</button>
             {/if}
@@ -162,7 +195,7 @@
   <div class="modal-overlay" on:click={closeBooking} on:keydown={(e) => e.key === 'Escape' && closeBooking()} role="dialog" aria-modal="true">
     <div class="modal" on:click|stopPropagation role="document">
       <div class="modal-header">
-        <h3>预约课程</h3>
+        <h3>{bookingMode === 'waitlist' ? '加入候补' : '预约课程'}</h3>
         <button class="modal-close" on:click={closeBooking} aria-label="关闭">✕</button>
       </div>
       <div class="modal-body">
@@ -170,7 +203,11 @@
           <div class="booking-course-info">
             <p><strong>{selectedCourse.title}</strong></p>
             <p>📅 {selectedCourse.date} | 🕐 {selectedCourse.time_slot}</p>
-            <p>剩余名额：{selectedCourse.capacity - selectedCourse.booked}</p>
+            {#if bookingMode === 'waitlist'}
+              <p>当前候补：{selectedCourse.capacity - selectedCourse.booked >= 0 ? '名额已满' : ''}，加入后将按顺序通知</p>
+            {:else}
+              <p>剩余名额：{selectedCourse.capacity - selectedCourse.booked}</p>
+            {/if}
           </div>
         {/if}
 
@@ -206,7 +243,7 @@
             <div class="msg-error">{bookingError}</div>
           {/if}
           <button class="btn btn-primary btn-block" on:click={submitBooking} disabled={bookingLoading}>
-            {bookingLoading ? '提交中...' : '确认预约'}
+            {bookingLoading ? '提交中...' : (bookingMode === 'waitlist' ? '确认加入候补' : '确认预约')}
           </button>
         {/if}
       </div>
@@ -342,11 +379,14 @@
 
   .btn-primary:hover { background: #a0522d; }
 
-  .btn-disabled {
-    background: #ddd;
-    color: #999;
+  .btn-waitlist {
+    background: #fd7e14;
+    color: white;
     width: 100%;
-    cursor: not-allowed;
+  }
+
+  .btn-waitlist:hover {
+    background: #e67312;
   }
 
   .btn-block { width: 100%; }

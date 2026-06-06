@@ -17,13 +17,19 @@ func GetCourses(c *gin.Context) {
 
 	query := `
 		SELECT c.id, c.title, c.date, c.time_slot, c.capacity, c.created_at, c.updated_at,
-			COALESCE(b.booked_count, 0) as booked
+			COALESCE(b.booked_count, 0) as booked,
+			COALESCE(w.waitlist_count, 0) as waitlist_count
 		FROM courses c
 		LEFT JOIN (
 			SELECT course_id, COUNT(*) as booked_count
 			FROM bookings WHERE status = 'booked'
 			GROUP BY course_id
 		) b ON c.id = b.course_id
+		LEFT JOIN (
+			SELECT course_id, COUNT(*) as waitlist_count
+			FROM waitlists WHERE status IN ('waiting', 'notified')
+			GROUP BY course_id
+		) w ON c.id = w.course_id
 	`
 	var rows *sql.Rows
 	var err error
@@ -48,7 +54,7 @@ func GetCourses(c *gin.Context) {
 	courses := []models.Course{}
 	for rows.Next() {
 		var co models.Course
-		if err := rows.Scan(&co.ID, &co.Title, &co.Date, &co.TimeSlot, &co.Capacity, &co.CreatedAt, &co.UpdatedAt, &co.Booked); err != nil {
+		if err := rows.Scan(&co.ID, &co.Title, &co.Date, &co.TimeSlot, &co.Capacity, &co.CreatedAt, &co.UpdatedAt, &co.Booked, &co.WaitlistCount); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -64,15 +70,21 @@ func GetCourse(c *gin.Context) {
 	var co models.Course
 	err := db.DB.QueryRow(`
 		SELECT c.id, c.title, c.date, c.time_slot, c.capacity, c.created_at, c.updated_at,
-			COALESCE(b.booked_count, 0) as booked
+			COALESCE(b.booked_count, 0) as booked,
+			COALESCE(w.waitlist_count, 0) as waitlist_count
 		FROM courses c
 		LEFT JOIN (
 			SELECT course_id, COUNT(*) as booked_count
 			FROM bookings WHERE status = 'booked'
 			GROUP BY course_id
 		) b ON c.id = b.course_id
+		LEFT JOIN (
+			SELECT course_id, COUNT(*) as waitlist_count
+			FROM waitlists WHERE status IN ('waiting', 'notified')
+			GROUP BY course_id
+		) w ON c.id = w.course_id
 		WHERE c.id = ?
-	`, id).Scan(&co.ID, &co.Title, &co.Date, &co.TimeSlot, &co.Capacity, &co.CreatedAt, &co.UpdatedAt, &co.Booked)
+	`, id).Scan(&co.ID, &co.Title, &co.Date, &co.TimeSlot, &co.Capacity, &co.CreatedAt, &co.UpdatedAt, &co.Booked, &co.WaitlistCount)
 
 	if err == sql.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"error": "课程不存在"})
